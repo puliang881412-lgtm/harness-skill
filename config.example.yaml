@@ -1,0 +1,69 @@
+# Harness Configuration Example
+# Copy this to your project root: .swarm/config.yaml
+
+harness:
+  # 最多并发执行的子任务数
+  maxConcurrency: 3
+
+  # 每个子任务失败后的最大重试次数
+  retryLimit: 3
+
+  # 单个 sub-agent 调用的超时时间（毫秒）
+  timeoutMs: 600000
+
+  # Agent 配置 — 为不同角色指定 LLM
+  agents:
+    # default: 所有角色的默认配置（如果没有为特定角色单独配置）
+    default:
+      provider: anthropic
+      baseUrl: https://api.deepseek.com/anthropic
+      apiKey: sk-your-deepseek-api-key-here
+      model: deepseek-v4-flash
+
+    # 可选：为特定角色覆盖配置
+    # developer:
+    #   provider: anthropic
+    #   baseUrl: https://api.deepseek.com/anthropic
+    #   apiKey: sk-your-key
+    #   model: deepseek-v4-flash
+
+    # reviewer:
+    #   provider: anthropic
+    #   baseUrl: https://api.anthropic.com
+    #   apiKey: sk-ant-your-claude-key
+    #   model: claude-sonnet-4-6
+
+    # tester:
+    #   provider: anthropic
+    #   baseUrl: https://api.anthropic.com
+    #   apiKey: sk-ant-your-claude-key
+    #   model: claude-sonnet-4-6
+
+  # 交付策略
+  delivery:
+    # auto_merge: 自动 fast-forward 合并到主分支
+    strategy: auto_merge
+
+    # 交付成功后是否自动清理 worktrees 和分支（默认 true）
+    # 设为 false 可保留现场用于审计
+    autoCleanupOnDelivery: true
+
+# 其他 LLM 配置示例：
+
+# Claude 官方 API:
+# agents:
+#   default:
+#     provider: anthropic
+#     baseUrl: https://api.anthropic.com
+#     apiKey: sk-ant-your-key
+#     model: claude-opus-4-7
+
+# 本地 Ollama (需要支持 Anthropic-compatible API):
+# agents:
+#   default:
+#     provider: anthropic
+#     baseUrl: http://localhost:11434/v1
+#     apiKey: ollama
+#     model: qwen2.5-coder:32b
+
+# 不配置 agents 块 → 使用当前 Claude Code 会话的模型
