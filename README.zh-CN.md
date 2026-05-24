@@ -60,7 +60,7 @@ Harness 通过在**隔离的 Git worktree** 中编排**多个专业化智能体�
 
 ```mermaid
 graph TB
-    U[用户] -->|/harness "&lt;需求&gt;"| O[编排器<br/>主 Claude Code 会话]
+    U[用户] -->|"/harness 需求"| O[编排器<br/>主 Claude Code 会话]
 
     O -->|调用| P[Planner 智能体]
     P -->|分解| ST[子任务图]

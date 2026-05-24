@@ -60,7 +60,7 @@ It runs entirely on your machine, talks to whatever LLM API you configure (Claud
 
 ```mermaid
 graph TB
-    U[User] -->|/harness "&lt;requirement&gt;"| O[Orchestrator<br/>main Claude Code session]
+    U[User] -->|"/harness requirement"| O[Orchestrator<br/>main Claude Code session]
 
     O -->|invokes| P[Planner Agent]
     P -->|decomposes| ST[Subtask Graph]
