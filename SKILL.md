@@ -1,6 +1,6 @@
 ---
 name: harness
-description: "Multi-agent orchestration system. Splits tasks into subtasks, runs Developer/Reviewer/Tester agents in parallel Git worktrees, retries on failure, integrates and delivers. Trigger: /harness"
+description: "Multi-agent orchestration system. Clarifies the requirement through interactive Q&A, decomposes into subtasks, asks the user to confirm the plan before any work, then runs Developer/Reviewer/Tester agents in parallel Git worktrees, retries on failure, integrates and delivers. Trigger: /harness"
 ---
 
 # Harness: Local Multi-Agent Orchestration
@@ -22,12 +22,16 @@ When the user triggers `/harness "<requirement>"`:
 2. Check Git readiness (init if needed).
 3. Load or create task state in `.swarm/state/`.
 4. If resuming an existing task, pick up from current state.
-5. If new task, run the Planner to decompose into subtasks.
-6. Execute subtasks respecting dependencies and concurrency limits.
-7. For each subtask: Developer → Reviewer → Tester (retry on failure, max 3 retries).
-8. Integrate all passing subtask branches.
-9. Deliver to user's working directory.
-10. Output final report.
+5. **Clarify the requirement (Phase 0)** — through interactive dialogue, refine the requirement into a clear spec before any decomposition. NEVER skip this for a new task, no matter how simple it looks.
+6. If new task, run the Planner to decompose into subtasks.
+7. **Present the plan and HARD-STOP for user confirmation (Phase 1).** Do not execute anything until the user explicitly approves. If the user rejects, collect their feedback and re-plan.
+8. Execute subtasks respecting dependencies and concurrency limits.
+9. For each subtask: Developer → Reviewer → Tester (retry on failure, max 3 retries).
+10. Integrate all passing subtask branches.
+11. Deliver to user's working directory.
+12. Output final report.
+
+> **The two human-in-the-loop gates (Phase 0 clarify, Phase 1 confirm) are mandatory and non-skippable for every new task.** A single-subtask plan still goes through both. The orchestrator must not "optimize away" either gate because the requirement seems trivial — trivial-looking requirements are exactly where unexamined assumptions cause wasted work.
 
 ## Status Command
 
@@ -412,6 +416,55 @@ If `maxConcurrency` is 1, execute subtasks one at a time within each batch. The 
 
 This is the main execution loop. Follow these steps exactly.
 
+### Phase 0: Requirement Clarification (mandatory, non-skippable)
+
+Before any planning, refine the raw `<requirement>` into a clear, agreed spec through interactive dialogue. This gate runs for EVERY new task — a one-line "写个贪吃蛇" still goes through it. Do not skip it because the request looks simple.
+
+**Step 0.1 — Prefer the superpowers brainstorming skill if available.**
+
+Check whether the `superpowers:brainstorming` skill is installed (it appears in the available-skills list, or its file exists):
+
+```bash
+ls ~/.claude/plugins/superpowers/skills/brainstorming/SKILL.md 2>/dev/null \
+  || find ~/.claude/plugins -ipath "*brainstorming/SKILL.md" 2>/dev/null | head -1
+```
+
+If found, invoke it via the Skill tool to drive the clarification dialogue:
+- Use `superpowers:brainstorming` to explore intent, constraints, and success criteria one question at a time.
+- **Override its terminal state.** That skill normally ends by writing a design doc and invoking `writing-plans`. For harness, do NOT let it call `writing-plans` or any implementation skill. The moment the requirement is clear and the user agrees on scope, STOP the brainstorm and return control to harness Phase 1 (Planning). Capture the agreed spec text.
+- Store the final agreed spec as `clarifiedRequirement` for the session.
+
+**Step 0.2 — Fallback: built-in lightweight clarification (when superpowers is absent).**
+
+Run a short dialogue yourself. Keep it conversational, one focused question at a time, but bounded — aim to converge in 1–4 questions, then summarize. Cover only what's genuinely ambiguous:
+
+- **Purpose & scope** — what problem, who uses it, what's explicitly out of scope.
+- **Tech constraints** — language/framework/runtime; existing stack to match (read the file tree first); single file vs project structure.
+- **Behavior & rules** — key features, edge cases, acceptance criteria ("done" means what).
+- **Look & feel** (if UI) — style, theme, responsiveness.
+
+Prefer multiple-choice phrasing when you can (use the AskUserQuestion tool for crisp option sets), open-ended when you can't. When the user gives a detailed requirement up front, you may ask fewer questions — but you must still produce the spec summary in Step 0.3 and get a confirmation.
+
+**Step 0.3 — Summarize the agreed spec and get a green light.**
+
+Present a concise spec recap and wait for the user to confirm or correct it:
+
+```
+[harness] 需求已澄清，请确认：
+
+  目标：<one-line goal>
+  技术栈：<stack / single-file / etc.>
+  关键功能：
+    - <feature 1>
+    - <feature 2>
+  验收标准：<what "done" means>
+  范围之外：<explicitly excluded>
+
+确认无误开始拆分？(y / 修改意见)
+```
+
+If the user replies with corrections, fold them in and re-summarize. Only proceed to Phase 1 once the user accepts. Store the accepted text as `clarifiedRequirement` — Phase 1 plans against THIS, not the raw one-liner.
+
 ### Phase 1: Planning
 
 1. Output: `[harness] 任务开始: <requirement>`
@@ -422,7 +475,7 @@ This is the main execution loop. Follow these steps exactly.
 6. Parse the planner's JSON output into subtasks and dependencies.
 7. Write `task.json` with subtask list and dependencies.
 8. Create `status.json` for each subtask.
-9. Output the plan for user confirmation:
+9. Output the plan for user confirmation. **This is a mandatory HARD-STOP — do not create worktrees, dispatch any agent, or write any code before the user explicitly approves. This gate runs even when there is only ONE subtask.** Always render the full plan, including the single-subtask case:
 
 ```
 [harness] 规划完成，共 <N> 个子任务：
@@ -438,11 +491,34 @@ This is the main execution loop. Follow these steps exactly.
   Batch 1（并发）:     backend-api, frontend-login
   Batch 2（并发）:     frontend-dashboard
 
-是否开始执行？(y/n)
+是否开始执行？
+  y / yes        → 开始执行
+  n / 修改意见   → 不执行，并把你的意见告诉我，我会据此重新拆分
 ```
 
-10. Wait for user input. If user inputs anything other than `y` / `yes` / `Y`, output `[harness] 已取消` and stop.
-11. Output: `[harness] 开始执行...`
+For a single-subtask plan, still print it explicitly, e.g.:
+
+```
+[harness] 规划完成，共 1 个子任务：
+
+  #  ID            标题            依赖
+  1  snake-game    贪吃蛇单页游戏   (无)
+
+并发批次：
+  Batch 0（立即执行）: snake-game
+
+是否开始执行？(y / 修改意见)
+```
+
+10. **Wait for explicit user input. Do not proceed on silence or assumption.**
+    - If the user replies `y` / `yes` / `Y` / `确认` / `开始` → go to Phase 2.
+    - If the user replies `n` / `no` / `取消` with no further detail → output `[harness] 已取消` and stop.
+    - **If the user gives any feedback, correction, or alternative direction** (e.g. "拆得太碎了，合成一个就行" / "再加一个排行榜子任务" / "用 React 不要原生 JS") → treat it as a re-plan request:
+      a. Output: `[harness] 收到意见，正在重新拆分...`
+      b. Re-run the Planner (Phase 1 from step 3), feeding it the original `clarifiedRequirement` PLUS the user's feedback as additional constraints.
+      c. Present the new plan and HARD-STOP again (back to step 9).
+      d. Loop until the user approves with `y`, or cancels. There is no limit on re-plan rounds.
+11. Only after explicit approval — Output: `[harness] 开始执行...` and proceed to Phase 2.
 
 ### Phase 2: Worktree Setup
 
